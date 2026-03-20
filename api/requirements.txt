@@ -5,3 +5,7 @@ pydantic-settings>=2.0.0
 oracledb>=2.1.0
 supabase>=2.3.0
 duckdb>=0.10.0
+python-dotenv
+requests
+boto3
+python-multipart
