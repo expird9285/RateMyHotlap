@@ -3,9 +3,10 @@ uvicorn>=0.27.1
 pydantic>=2.0.0
 pydantic-settings>=2.0.0
 oracledb>=2.1.0
-supabase>=2.3.0
 duckdb>=0.10.0
+numpy>=1.24.0
 python-dotenv
 requests
 boto3
 python-multipart
+PyJWT>=2.8.0

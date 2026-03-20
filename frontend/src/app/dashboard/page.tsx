@@ -1,156 +1,252 @@
 "use client";
-
-import { useEffect, useState, useRef } from "react";
-import { supabase } from "@/utils/supabase";
+import { useEffect, useState, useRef, useCallback } from "react";
+import { useAuth } from "@/components/AuthProvider";
 import { useRouter } from "next/navigation";
-import { motion } from "framer-motion";
-import { Upload, LogOut, FileBarChart, History } from "lucide-react";
-import axios from "axios";
+import { motion, AnimatePresence } from "framer-motion";
+import { Upload, Search, Filter, Clock, Trophy, ChevronRight, GitCompare } from "lucide-react";
+import { fetchLaps, uploadTelemetry, fetchImportJob, type Lap, type ImportJob } from "@/utils/api";
+
+function formatLapTime(ms: number | null): string {
+  if (!ms) return "--:--.---";
+  const mins = Math.floor(ms / 60000);
+  const secs = Math.floor((ms % 60000) / 1000);
+  const millis = ms % 1000;
+  return `${mins}:${secs.toString().padStart(2, "0")}.${millis.toString().padStart(3, "0")}`;
+}
 
 export default function Dashboard() {
+  const { session, loading: authLoading } = useAuth();
   const router = useRouter();
-  const [session, setSession] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
+
+  const [laps, setLaps] = useState<Lap[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [search, setSearch] = useState("");
+  const [gameFilter, setGameFilter] = useState("");
+
+  // Upload state
   const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [importJob, setImportJob] = useState<ImportJob | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Compare selection
+  const [selectedLaps, setSelectedLaps] = useState<number[]>([]);
+
   useEffect(() => {
-    const fetchSession = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) {
-        router.push("/");
-      } else {
-        setSession(session);
-        setLoading(false);
-      }
-    };
-    fetchSession();
-  }, [router]);
+    if (!authLoading && !session) router.push("/");
+  }, [authLoading, session, router]);
 
-  const handleLogout = async () => {
-    await supabase.auth.signOut();
-    router.push("/");
-  };
-
-  const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-
-    setUploading(true);
-    const formData = new FormData();
-    formData.append("telemetry_file", file);
-
+  const loadLaps = useCallback(async () => {
+    setLoading(true);
     try {
-      const token = session?.access_token;
-      // In development, assume backend runs on localhost:8000
-      const response = await axios.post("http://localhost:8000/api/upload", formData, {
-        headers: {
-          "Content-Type": "multipart/form-data",
-          Authorization: `Bearer ${token}`
-        }
+      const data = await fetchLaps({
+        game: gameFilter || undefined,
+        search: search || undefined,
       });
-      alert(`Upload successful! Job ID: ${response.data.job_id}`);
-    } catch (error) {
-      console.error("Upload failed:", error);
-      alert("Upload failed. Please try again.");
+      setLaps(data);
+    } catch (e) {
+      console.error("Failed to load laps:", e);
+    } finally {
+      setLoading(false);
+    }
+  }, [gameFilter, search]);
+
+  useEffect(() => {
+    if (session) loadLaps();
+  }, [session, loadLaps]);
+
+  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
+    setImportJob(null);
+    setUploadProgress(0);
+    try {
+      const result = await uploadTelemetry(file, setUploadProgress);
+      // Poll import job status
+      const poll = async () => {
+        for (let i = 0; i < 30; i++) {
+          await new Promise((r) => setTimeout(r, 1000));
+          try {
+            const job = await fetchImportJob(result.job_id);
+            setImportJob(job);
+            if (["success", "failed", "partial_success"].includes(job.status)) {
+              loadLaps();
+              return;
+            }
+          } catch { break; }
+        }
+      };
+      poll();
+    } catch (err) {
+      setImportJob({ id: 0, status: "failed", total_laps: 0, imported_laps: 0, failed_laps: 0, warnings: ["Upload failed. Please try again."] });
     } finally {
       setUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
     }
   };
 
-  if (loading) return <div className="min-h-screen bg-zinc-950 flex items-center justify-center text-white">Loading...</div>;
+  const toggleLapSelect = (id: number) => {
+    setSelectedLaps((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : prev.length < 2 ? [...prev, id] : [prev[1], id]
+    );
+  };
+
+  const canCompare = selectedLaps.length === 2;
+
+  if (authLoading || !session) {
+    return <div className="min-h-screen flex items-center justify-center"><div className="w-8 h-8 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" /></div>;
+  }
 
   return (
-    <div className="min-h-screen bg-zinc-950 text-white">
-      {/* Header */}
-      <header className="border-b border-zinc-800 bg-zinc-900/50 backdrop-blur-md sticky top-0 z-10 w-full px-6 py-4 flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-emerald-400">
-          RateMyHotlap
-        </h1>
-        <div className="flex items-center gap-4">
-          <span className="text-zinc-400 text-sm hidden sm:inline">{session?.user?.email}</span>
-          <button 
-            onClick={handleLogout}
-            className="flex items-center gap-2 px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-sm transition-colors text-zinc-300"
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8">
+      {/* Top bar: Upload + Compare */}
+      <div className="flex flex-col sm:flex-row gap-4 mb-8">
+        <div className="flex-1">
+          <h2 className="text-2xl font-bold mb-1">My Laps</h2>
+          <p className="text-zinc-500 text-sm">{laps.length} laps uploaded</p>
+        </div>
+        <div className="flex gap-3">
+          {canCompare && (
+            <button
+              onClick={() => router.push(`/compare?a=${selectedLaps[0]}&b=${selectedLaps[1]}`)}
+              className="flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 rounded-xl text-sm font-semibold transition-all shadow-lg hover:shadow-emerald-500/20"
+            >
+              <GitCompare size={16} /> Compare Selected
+            </button>
+          )}
+          <input type="file" accept=".ld,.duckdb" className="hidden" ref={fileInputRef} onChange={handleUpload} />
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            disabled={uploading}
+            className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-500 rounded-xl text-sm font-semibold transition-all shadow-lg hover:shadow-blue-500/20 disabled:opacity-50"
           >
-            <LogOut size={16} /> Logout
+            <Upload size={16} /> {uploading ? `Uploading ${uploadProgress}%` : "Upload File"}
           </button>
         </div>
-      </header>
+      </div>
 
-      <main className="max-w-6xl mx-auto p-6 mt-8">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          
-          {/* Main Upload Widget */}
-          <motion.div 
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="col-span-1 md:col-span-2 bg-gradient-to-br from-zinc-900 to-zinc-800/50 rounded-2xl p-8 border border-zinc-800 shadow-xl flex flex-col items-center justify-center min-h-[400px]"
+      {/* Import job status */}
+      <AnimatePresence>
+        {importJob && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }}
+            className={`mb-6 p-4 rounded-xl border text-sm ${
+              importJob.status === "success" ? "bg-emerald-950/50 border-emerald-800 text-emerald-300"
+              : importJob.status === "failed" ? "bg-red-950/50 border-red-800 text-red-300"
+              : importJob.status === "partial_success" ? "bg-yellow-950/50 border-yellow-800 text-yellow-300"
+              : "bg-zinc-900 border-zinc-700 text-zinc-300"
+            }`}
           >
-            <div className="bg-blue-500/10 p-6 rounded-full mb-6">
-              <Upload className="text-blue-400" size={48} />
+            <div className="font-semibold mb-1">
+              Import {importJob.status === "success" ? "Complete ✓" : importJob.status === "failed" ? "Failed ✗" : importJob.status === "processing" ? "Processing..." : importJob.status}
             </div>
-            <h2 className="text-2xl font-bold mb-2">Upload Telemetry</h2>
-            <p className="text-zinc-400 mb-8 text-center max-w-sm">
-              Select your Assetto Corsa Competizione (.ld) or Le Mans Ultimate (.duckdb) telemetry file to begin analysis.
-            </p>
-            
-            <input 
-              type="file" 
-              accept=".ld,.duckdb" 
-              className="hidden" 
-              ref={fileInputRef}
-              onChange={handleFileChange}
-            />
-            
-            <button 
-              onClick={() => fileInputRef.current?.click()}
-              disabled={uploading}
-              className={`bg-blue-500 hover:bg-blue-600 text-white font-semibold py-3 px-8 rounded-xl transition-all shadow-lg hover:shadow-blue-500/25 ${uploading ? "opacity-50 cursor-not-allowed" : ""}`}
-            >
-              {uploading ? "Uploading..." : "Select File"}
-            </button>
+            {importJob.imported_laps != null && <p>Imported: {importJob.imported_laps} laps</p>}
+            {importJob.warnings?.length > 0 && (
+              <ul className="mt-2 space-y-1 text-xs opacity-80">{importJob.warnings.map((w, i) => <li key={i}>⚠ {w}</li>)}</ul>
+            )}
           </motion.div>
+        )}
+      </AnimatePresence>
 
-          {/* Sidebar Modules */}
-          <div className="flex flex-col gap-6">
-            <motion.div 
-              initial={{ opacity: 0, x: 20 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ delay: 0.1 }}
-              className="bg-zinc-900 rounded-2xl p-6 border border-zinc-800 shadow-lg"
-            >
-              <div className="flex items-center gap-3 mb-4">
-                <History className="text-emerald-400" size={24} />
-                <h3 className="text-lg font-semibold">Recent Laps</h3>
-              </div>
-              <div className="flex flex-col gap-3">
-                <div className="text-zinc-500 text-sm text-center py-8">
-                  No laps uploaded yet.
-                </div>
-              </div>
-            </motion.div>
-
-            <motion.div 
-              initial={{ opacity: 0, x: 20 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ delay: 0.2 }}
-              className="bg-zinc-900 rounded-2xl p-6 border border-zinc-800 shadow-lg"
-            >
-              <div className="flex items-center gap-3 mb-4">
-                <FileBarChart className="text-purple-400" size={24} />
-                <h3 className="text-lg font-semibold">Stats Overview</h3>
-              </div>
-              <div className="flex flex-col gap-3">
-                 <div className="text-zinc-500 text-sm py-4">
-                  Upload your first lap to unlock AI insights and community comparisons.
-                </div>
-              </div>
-            </motion.div>
-          </div>
+      {/* Filters */}
+      <div className="flex flex-wrap gap-3 mb-6">
+        <div className="relative flex-1 min-w-[200px]">
+          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
+          <input
+            value={search} onChange={(e) => setSearch(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && loadLaps()}
+            placeholder="Search tracks, cars..."
+            className="w-full pl-10 pr-4 py-2.5 bg-zinc-900 border border-zinc-800 rounded-xl text-sm placeholder:text-zinc-600 focus:outline-none focus:ring-1 focus:ring-blue-500/50 focus:border-blue-500/50"
+          />
         </div>
-      </main>
+        {["", "ACC"].map((g) => (
+          <button
+            key={g}
+            onClick={() => { setGameFilter(g); setTimeout(loadLaps, 50); }}
+            className={`px-4 py-2.5 rounded-xl text-sm font-medium transition-all ${
+              gameFilter === g ? "bg-blue-600 text-white" : "bg-zinc-900 border border-zinc-800 text-zinc-400 hover:text-white"
+            }`}
+          >
+            {g || "All Games"}
+          </button>
+        ))}
+      </div>
+
+      {/* Lap list */}
+      {loading ? (
+        <div className="flex justify-center py-20"><div className="w-8 h-8 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" /></div>
+      ) : laps.length === 0 ? (
+        <div className="text-center py-20">
+          <Upload className="mx-auto mb-4 text-zinc-700" size={48} />
+          <p className="text-zinc-500 mb-2">No laps yet</p>
+          <p className="text-zinc-600 text-sm">Upload an ACC .ld file to get started</p>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {laps.map((lap, i) => (
+            <motion.div
+              key={lap.id}
+              initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.03 }}
+              onClick={() => toggleLapSelect(lap.id)}
+              className={`group flex items-center gap-4 p-4 rounded-xl border cursor-pointer transition-all ${
+                selectedLaps.includes(lap.id)
+                  ? "bg-blue-950/40 border-blue-700 ring-1 ring-blue-500/30"
+                  : "bg-zinc-900/50 border-zinc-800 hover:border-zinc-700 hover:bg-zinc-900"
+              }`}
+            >
+              {/* Selection indicator */}
+              <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-all ${
+                selectedLaps.includes(lap.id) ? "border-blue-400 bg-blue-500" : "border-zinc-700"
+              }`}>
+                {selectedLaps.includes(lap.id) && <div className="w-2 h-2 rounded-full bg-white" />}
+              </div>
+
+              {/* Game badge */}
+              <span className={`px-2 py-0.5 rounded text-xs font-bold flex-shrink-0 ${
+                lap.game === "ACC" ? "bg-red-900/50 text-red-400" : "bg-blue-900/50 text-blue-400"
+              }`}>{lap.game}</span>
+
+              {/* Track + Car */}
+              <div className="flex-1 min-w-0">
+                <div className="font-medium truncate">{lap.track || "Unknown Track"}</div>
+                <div className="text-zinc-500 text-sm truncate">{lap.car || "Unknown Car"}</div>
+              </div>
+
+              {/* Lap time */}
+              <div className="text-right flex-shrink-0">
+                <div className="font-mono text-lg font-semibold text-emerald-400">{formatLapTime(lap.lap_time_ms)}</div>
+                <div className="text-zinc-600 text-xs">
+                  {lap.uploaded_at ? new Date(lap.uploaded_at).toLocaleDateString() : ""}
+                </div>
+              </div>
+
+              {/* View detail arrow */}
+              <button
+                onClick={(e) => { e.stopPropagation(); router.push(`/laps/${lap.id}`); }}
+                className="p-2 rounded-lg hover:bg-zinc-800 text-zinc-600 hover:text-white transition-all opacity-0 group-hover:opacity-100"
+              >
+                <ChevronRight size={18} />
+              </button>
+            </motion.div>
+          ))}
+        </div>
+      )}
+
+      {selectedLaps.length > 0 && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-zinc-900 border border-zinc-700 rounded-2xl px-6 py-3 shadow-2xl flex items-center gap-4 text-sm">
+          <span className="text-zinc-400">{selectedLaps.length}/2 laps selected</span>
+          {canCompare && (
+            <button
+              onClick={() => router.push(`/compare?a=${selectedLaps[0]}&b=${selectedLaps[1]}`)}
+              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 rounded-lg font-semibold transition-all"
+            >
+              Compare →
+            </button>
+          )}
+          <button onClick={() => setSelectedLaps([])} className="text-zinc-500 hover:text-white transition-colors">Clear</button>
+        </div>
+      )}
     </div>
   );
 }
