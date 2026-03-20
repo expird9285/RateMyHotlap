@@ -1,0 +1,29 @@
+# Environments
+.env
+.env.*
+!.env.example
+
+# IDE
+.vscode/
+.idea/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+venv/
+env/
+.venv/
+
+# OCI Wallet
+api/wallet/
+api/wallet_*/
+wallet/
+wallet_*/
+*.zip
+
+# Next.js (already covered in frontend/.gitignore, but good to have)
+node_modules/
+.next/
+out/
