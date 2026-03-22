@@ -30,6 +30,8 @@ def _get_s3_client():
     return _s3_client
 
 
+import io
+
 def upload_file_to_oci(
     file_data: bytes,
     object_key: str,
@@ -39,11 +41,13 @@ def upload_file_to_oci(
     client = _get_s3_client()
     settings = get_settings()
 
-    client.put_object(
-        Bucket=settings.oci_bucket_name,
-        Key=object_key,
-        Body=file_data,
-        ContentType=content_type,
-        ContentLength=len(file_data),
+    # 대용량 파일(50MB 이상) 전송 시 MissingContentLength 에러 회피를 위해
+    # io.BytesIO로 래핑한 뒤 multipart 업로드가 자동 적용되는 upload_fileobj 사용
+    file_obj = io.BytesIO(file_data)
+    client.upload_fileobj(
+        file_obj,
+        settings.oci_bucket_name,
+        object_key,
+        ExtraArgs={"ContentType": content_type}
     )
     return object_key
