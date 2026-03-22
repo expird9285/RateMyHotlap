@@ -44,7 +44,7 @@ def _resolve_or_create_user(cursor, conn, supabase_user_id: str, user: dict) -> 
         [supabase_user_id, email, username, avatar_url, id_var],
     )
     conn.commit()
-    return id_var.getvalue()[0]
+    return id_var.getvalue()
 
 
 @router.post("")
@@ -114,7 +114,7 @@ async def upload_files(
             ],
         )
 
-        raw_file_id = raw_file_id_var.getvalue()[0]
+        raw_file_id = raw_file_id_var.getvalue()
 
         # ── Create import_job ──
         job_id_var = cursor.var(int)
@@ -131,7 +131,7 @@ async def upload_files(
             [db_user_id, raw_file_id, game, job_id_var],
         )
         conn.commit()
-        job_id = job_id_var.getvalue()[0]
+        job_id = job_id_var.getvalue()
 
         # ── Run import (synchronous for now) ──
         try:

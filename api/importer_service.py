@@ -104,8 +104,7 @@ def run_import(
                         lap_id_var,
                     ],
                 )
-                lap_id = lap_id_var.getvalue()[0]
-
+                lap_id = lap_id_var.getvalue()
                 # Insert telemetry (channels as JSON)
                 telemetry_json = json.dumps(channels)
                 cursor.execute(
