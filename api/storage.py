@@ -26,8 +26,13 @@ def _get_s3_client():
         aws_access_key_id=settings.oci_access_key,
         aws_secret_access_key=settings.oci_secret_key,
         config=BotoConfig(
-            signature_version="s3v4", # OCI 권장 서명 설정
-            s3={"addressing_style": "path"}
+            signature_version="s3v4",  # OCI 권장 서명 설정
+            s3={
+                "addressing_style": "path",
+                "payload_signing_enabled": True,
+            },
+            request_checksum_calculation="when_required",
+            response_checksum_validation="when_required",
         ),
     )
     return _s3_client
