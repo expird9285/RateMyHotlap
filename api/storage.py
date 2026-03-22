@@ -9,6 +9,21 @@ from api.config import get_settings
 _s3_client = None
 
 
+def _add_content_length(request, **kwargs):
+    """OCI Object Storage는 Content-Length를 엄격하게 요구하므로 botocore가 생략할 때 강제로 끼워넣습니다."""
+    if 'Content-Length' not in request.headers:
+        if hasattr(request.body, 'len'):
+            request.headers['Content-Length'] = str(request.body.len)
+        elif hasattr(request.body, '__len__'):
+            request.headers['Content-Length'] = str(len(request.body))
+        elif hasattr(request.body, 'read'):
+            # 파일 스트림 길이 측정
+            pos = request.body.tell()
+            request.body.seek(0, 2)
+            length = request.body.tell()
+            request.body.seek(pos)
+            request.headers['Content-Length'] = str(length)
+
 def _get_s3_client():
     global _s3_client
     if _s3_client is not None:
@@ -25,8 +40,14 @@ def _get_s3_client():
         endpoint_url=endpoint_url,
         aws_access_key_id=settings.oci_access_key,
         aws_secret_access_key=settings.oci_secret_key,
-        config=BotoConfig(s3={"addressing_style": "path"}),
+        config=BotoConfig(
+            signature_version="s3v4", # OCI 권장 서명 설정
+            s3={"addressing_style": "path"}
+        ),
     )
+    
+    # botocore 요청이 만들어질 때마다 강제로 헤더를 체크
+    _s3_client.meta.events.register('request-created.s3', _add_content_length)
     return _s3_client
 
 
