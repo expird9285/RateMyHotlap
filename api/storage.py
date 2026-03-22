@@ -44,5 +44,6 @@ def upload_file_to_oci(
         Key=object_key,
         Body=file_data,
         ContentType=content_type,
+        ContentLength=len(file_data),
     )
     return object_key
