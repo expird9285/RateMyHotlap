@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { Upload, Search, Filter, Clock, Trophy, ChevronRight, GitCompare } from "lucide-react";
 import { fetchLaps, uploadTelemetry, fetchImportJob, type Lap, type ImportJob } from "@/utils/api";
+import UploadModal from "@/components/UploadModal";
 
 function formatLapTime(ms: number | null): string {
   if (!ms) return "--:--.---";
@@ -26,8 +27,8 @@ export default function Dashboard() {
   // Upload state
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
+  const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const [importJob, setImportJob] = useState<ImportJob | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Compare selection
   const [selectedLaps, setSelectedLaps] = useState<number[]>([]);
@@ -55,14 +56,12 @@ export default function Dashboard() {
     if (session) loadLaps();
   }, [session, loadLaps]);
 
-  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  const handleUpload = async (file: File, ldxFile: File | null) => {
     setUploading(true);
     setImportJob(null);
     setUploadProgress(0);
     try {
-      const result = await uploadTelemetry(file, setUploadProgress);
+      const result = await uploadTelemetry(file, ldxFile, setUploadProgress);
       // Poll import job status
       const poll = async () => {
         for (let i = 0; i < 30; i++) {
@@ -72,17 +71,19 @@ export default function Dashboard() {
             setImportJob(job);
             if (["success", "failed", "partial_success"].includes(job.status)) {
               loadLaps();
+              setIsUploadModalOpen(false);
               return;
             }
           } catch { break; }
         }
+        setIsUploadModalOpen(false);
       };
       poll();
     } catch (err) {
       setImportJob({ id: 0, status: "failed", total_laps: 0, imported_laps: 0, failed_laps: 0, warnings: ["Upload failed. Please try again."] });
+      setIsUploadModalOpen(false);
     } finally {
       setUploading(false);
-      if (fileInputRef.current) fileInputRef.current.value = "";
     }
   };
 
@@ -115,16 +116,22 @@ export default function Dashboard() {
               <GitCompare size={16} /> Compare Selected
             </button>
           )}
-          <input type="file" accept=".ld,.duckdb" className="hidden" ref={fileInputRef} onChange={handleUpload} />
           <button
-            onClick={() => fileInputRef.current?.click()}
-            disabled={uploading}
-            className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-500 rounded-xl text-sm font-semibold transition-all shadow-lg hover:shadow-blue-500/20 disabled:opacity-50"
+            onClick={() => setIsUploadModalOpen(true)}
+            className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-500 rounded-xl text-sm font-semibold transition-all shadow-lg hover:shadow-blue-500/20"
           >
-            <Upload size={16} /> {uploading ? `Uploading ${uploadProgress}%` : "Upload File"}
+            <Upload size={16} /> Upload Laps
           </button>
         </div>
       </div>
+      
+      <UploadModal 
+        isOpen={isUploadModalOpen} 
+        onClose={() => setIsUploadModalOpen(false)} 
+        onUpload={handleUpload} 
+        uploading={uploading} 
+        uploadProgress={uploadProgress} 
+      />
 
       {/* Import job status */}
       <AnimatePresence>

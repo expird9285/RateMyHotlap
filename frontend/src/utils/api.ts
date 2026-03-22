@@ -63,10 +63,14 @@ export interface UploadResult {
 
 export async function uploadTelemetry(
   file: File,
+  ldxFile?: File | null,
   onProgress?: (pct: number) => void
 ): Promise<UploadResult> {
   const formData = new FormData();
   formData.append("telemetry_file", file);
+  if (ldxFile) {
+    formData.append("ldx_file", ldxFile);
+  }
   const { data } = await api.post("/api/upload", formData, {
     headers: { "Content-Type": "multipart/form-data" },
     onUploadProgress: (e) => {

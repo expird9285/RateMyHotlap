@@ -16,6 +16,7 @@ def run_import(
     game: str,
     file_content: bytes,
     file_ext: str,
+    ldx_content: Optional[bytes] = None,
 ) -> None:
     """
     Execute the import pipeline:
@@ -41,7 +42,7 @@ def run_import(
 
         try:
             if file_ext == "ld":
-                normalized_laps = parse_ld_bytes(file_content)
+                normalized_laps = parse_ld_bytes(file_content, ldx_content=ldx_content)
             elif file_ext == "duckdb":
                 # LMU parser is still a stub — mark accordingly
                 all_warnings.append("LMU DuckDB import is not yet implemented.")

@@ -51,6 +51,7 @@ def _resolve_or_create_user(cursor, conn, supabase_user_id: str, user: dict) -> 
 async def upload_files(
     telemetry_file: UploadFile = File(...),
     setup_file: Optional[UploadFile] = File(None),
+    ldx_file: Optional[UploadFile] = File(None),
     user: dict = Depends(get_current_user),
 ):
     supabase_user_id = user.get("id") or user.get("sub")
@@ -81,13 +82,20 @@ async def upload_files(
         size_bytes = len(content)
         file_hash = hashlib.sha256(content).hexdigest()
 
+        ldx_content = await ldx_file.read() if ldx_file else None
+
         # ── Upload to OCI Object Storage ──
         date_str = datetime.utcnow().strftime("%Y/%m/%d")
         unique_id = str(uuid.uuid4())
         object_key = f"raw/user_{db_user_id}/{game.lower()}/{date_str}/{unique_id}_session.{ext}"
+        ldx_object_key = None
+        if ldx_content:
+            ldx_object_key = f"raw/user_{db_user_id}/{game.lower()}/{date_str}/{unique_id}_session.ldx"
 
         try:
             upload_file_to_oci(content, object_key)
+            if ldx_content and ldx_object_key:
+                upload_file_to_oci(ldx_content, ldx_object_key)
         except Exception as e:
             raise HTTPException(
                 status_code=500, detail=f"Storage upload failed: {str(e)}"
@@ -142,6 +150,7 @@ async def upload_files(
                 game=game,
                 file_content=content,
                 file_ext=ext,
+                ldx_content=ldx_content,
             )
         except Exception as e:
             # Import failure is non-fatal for the upload response

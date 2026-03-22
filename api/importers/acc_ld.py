@@ -50,7 +50,7 @@ _REQUIRED_CHANNELS = {"speed", "throttle", "brake"}
 _OPTIONAL_CHANNELS = {"steer", "gear", "rpm", "g_lat", "g_lon", "spline"}
 
 
-def parse_ld_bytes(file_content: bytes) -> List[Dict[str, Any]]:
+def parse_ld_bytes(file_content: bytes, ldx_content: Optional[bytes] = None) -> List[Dict[str, Any]]:
     """
     Parse ACC .ld file content and return a list of NormalizedLap dicts.
 
@@ -63,12 +63,20 @@ def parse_ld_bytes(file_content: bytes) -> List[Dict[str, Any]]:
         tmp.write(file_content)
         tmp_path = tmp.name
 
+    ldx_path = None
+    if ldx_content:
+        ldx_path = tmp_path + "x" 
+        with open(ldx_path, "wb") as f:
+            f.write(ldx_content)
+
     try:
         ld = ldData.fromfile(tmp_path)
     except Exception as e:
         raise RuntimeError(f"Failed to parse .ld file: {e}")
     finally:
         os.unlink(tmp_path)
+        if ldx_path and os.path.exists(ldx_path):
+            os.unlink(ldx_path)
 
     # ── Extract metadata ──
     head = ld.head
