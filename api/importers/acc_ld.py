@@ -3,7 +3,7 @@ ACC .ld file importer — converts MoTeC telemetry to NormalizedLap.
 """
 import os
 import tempfile
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 from api.importers.ldparser import ldData
 
