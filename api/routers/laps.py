@@ -28,9 +28,9 @@ async def list_laps(
         SELECT id, game, track, car, lap_number, lap_time_ms,
                is_valid, is_public, recorded_at
         FROM laps
-        WHERE user_id = :uid
+        WHERE user_id = :u_id
     """
-    params: dict = {"uid": user_id}
+    params: dict = {"u_id": user_id}
 
     if game:
         query += " AND game = :game"
@@ -96,9 +96,9 @@ async def toggle_visibility(
         """
         UPDATE laps
         SET is_public = CASE WHEN is_public = 1 THEN 0 ELSE 1 END
-        WHERE id = :lid AND user_id = :uid
+        WHERE id = :lid AND user_id = :u_id
         """,
-        {"lid": lap_id, "uid": user_id},
+        {"lid": lap_id, "u_id": user_id},
     )
     if cursor.rowcount == 0:
         cursor.close()

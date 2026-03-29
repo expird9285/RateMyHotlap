@@ -59,8 +59,8 @@ async def upload_files(
 
     # ── 2. Check duplicate (by sha256 hash) ──
     cursor.execute(
-        "SELECT id FROM raw_files WHERE sha256 = :hash AND user_id = :uid",
-        {"hash": file_hash, "uid": db_user_id},
+        "SELECT id FROM raw_files WHERE sha256 = :hash AND user_id = :u_id",
+        {"hash": file_hash, "u_id": db_user_id},
     )
     if cursor.fetchone():
         raise HTTPException(status_code=409, detail="This file has already been uploaded")
@@ -83,14 +83,14 @@ async def upload_files(
             INSERT INTO raw_files
                 (user_id, game, file_type, original_name,
                  object_key, sha256, size_bytes)
-            VALUES (:uid, :game, :ftype, :fname,
+            VALUES (:u_id, :game, :ftype, :fname,
                     :okey, :sha, :fsize)
             RETURNING id INTO v_id;
             :ret := v_id;
         END;
         """,
         {
-            "uid": db_user_id,
+            "u_id": db_user_id,
             "game": game,
             "ftype": ext,
             "fname": filename,
@@ -110,14 +110,14 @@ async def upload_files(
         BEGIN
             INSERT INTO import_jobs
                 (raw_file_id, user_id, game, status, created_at)
-            VALUES (:rid, :uid, :game, 'pending', :cat)
+            VALUES (:rid, :u_id, :game, 'pending', :cat)
             RETURNING id INTO v_id;
             :ret := v_id;
         END;
         """,
         {
             "rid": raw_file_id,
-            "uid": db_user_id,
+            "u_id": db_user_id,
             "game": game,
             "cat": datetime.utcnow(),
             "ret": job_id_var,

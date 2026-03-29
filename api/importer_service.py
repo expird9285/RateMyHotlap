@@ -94,14 +94,14 @@ def run_import(
                         INSERT INTO laps
                             (user_id, game, track, car, lap_number,
                              lap_time_ms, is_valid, recorded_at, uploaded_at)
-                        VALUES (:uid, :game, :track, :car, :lnum,
+                        VALUES (:u_id, :game, :track, :car, :lnum,
                                 :ltime, :valid, :rec, :upl)
                         RETURNING id INTO v_id;
                         :ret := v_id;
                     END;
                     """,
                     {
-                        "uid": db_user_id,
+                        "u_id": db_user_id,
                         "game": meta.get("game", game),
                         "track": meta.get("track"),
                         "car": meta.get("car"),
