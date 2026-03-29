@@ -3,8 +3,9 @@ RateMyHotlap API — FastAPI application entry-point.
 """
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from api.config import get_settings
 from api.init_db import init_pool, init_tables, close_pool
@@ -46,6 +47,21 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ── Global exception handler (ensures CORS headers even on 500) ──
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    import traceback
+    traceback.print_exc()  # 서버 로그에 스택 추적 출력
+    return JSONResponse(
+        status_code=500,
+        content={"detail": str(exc)},
+        headers={
+            "Access-Control-Allow-Origin": request.headers.get("origin", "*"),
+            "Access-Control-Allow-Credentials": "true",
+        },
+    )
+
 
 # ── Routers ──
 app.include_router(upload.router)
