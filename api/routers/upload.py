@@ -12,7 +12,7 @@ import oracledb
 from api.auth import get_current_user
 from api.db import get_db
 from api.crud import resolve_or_create_user
-from api.storage import upload_to_oci
+from api.storage import upload_file_to_oci
 
 router = APIRouter(prefix="/upload", tags=["upload"])
 
@@ -68,7 +68,7 @@ async def upload_files(
     # ── 3. Upload to OCI Object Storage ──
     storage_key = f"{supabase_uid}/{file_hash}.{ext}"
     try:
-        upload_to_oci(file_content, storage_key)
+        upload_file_to_oci(file_content, storage_key)
     except Exception as e:
         raise HTTPException(
             status_code=500, detail=f"Storage upload failed: {e}"
