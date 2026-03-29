@@ -11,7 +11,8 @@ import oracledb
 def get_user_id(cursor, supabase_user_id: str) -> Optional[int]:
     """Look up internal user_id by Supabase user ID."""
     cursor.execute(
-        "SELECT id FROM users WHERE supabase_user_id = :1", [supabase_user_id]
+        "SELECT id FROM users WHERE supabase_user_id = :sub_id",
+        {"sub_id": supabase_user_id},
     )
     row = cursor.fetchone()
     return row[0] if row else None
@@ -35,12 +36,18 @@ def resolve_or_create_user(
         DECLARE v_id NUMBER;
         BEGIN
             INSERT INTO users (supabase_user_id, email, username, avatar_url)
-            VALUES (:1, :2, :3, :4)
+            VALUES (:sub_id, :email, :uname, :avatar)
             RETURNING id INTO v_id;
-            :5 := v_id;
+            :ret := v_id;
         END;
         """,
-        [supabase_user_id, email, username, avatar_url, id_var],
+        {
+            "sub_id": supabase_user_id,
+            "email": email,
+            "uname": username,
+            "avatar": avatar_url,
+            "ret": id_var,
+        },
     )
     conn.commit()
     return id_var.getvalue()
@@ -71,9 +78,9 @@ def get_lap_with_telemetry(
                    l.lap_time_ms, l.is_valid, l.is_public, t.points_json
             FROM laps l
             JOIN telemetry t ON l.id = t.lap_id
-            WHERE l.id = :1 AND (l.user_id = :2 OR l.is_public = 1)
+            WHERE l.id = :lid AND (l.user_id = :u_id OR l.is_public = 1)
             """,
-            [lap_id, user_id],
+            {"lid": lap_id, "u_id": user_id},
         )
     else:
         cursor.execute(
@@ -82,9 +89,9 @@ def get_lap_with_telemetry(
                    l.lap_time_ms, l.is_valid, l.is_public, t.points_json
             FROM laps l
             JOIN telemetry t ON l.id = t.lap_id
-            WHERE l.id = :1
+            WHERE l.id = :lid
             """,
-            [lap_id],
+            {"lid": lap_id},
         )
 
     row = cursor.fetchone()

@@ -1,7 +1,6 @@
 """
 Share router — create and retrieve public shared comparisons.
 """
-import json
 import secrets
 from datetime import datetime
 
@@ -42,10 +41,10 @@ async def create_share(
     # Check for existing share
     cursor.execute(
         """
-        SELECT share_code FROM shared_comparisons
-        WHERE user_id = :1 AND lap_a_id = :2 AND lap_b_id = :3
+        SELECT code FROM share_codes
+        WHERE created_by = :u_id AND lap_id_a = :la AND lap_id_b = :lb
         """,
-        [user_id, body.lap_a_id, body.lap_b_id],
+        {"u_id": user_id, "la": body.lap_a_id, "lb": body.lap_b_id},
     )
     existing = cursor.fetchone()
     if existing:
@@ -56,11 +55,17 @@ async def create_share(
     code = secrets.token_urlsafe(8)
     cursor.execute(
         """
-        INSERT INTO shared_comparisons
-            (share_code, user_id, lap_a_id, lap_b_id, created_at)
-        VALUES (:1, :2, :3, :4, :5)
+        INSERT INTO share_codes
+            (code, created_by, lap_id_a, lap_id_b, created_at)
+        VALUES (:code, :u_id, :la, :lb, :cat)
         """,
-        [code, user_id, body.lap_a_id, body.lap_b_id, datetime.utcnow()],
+        {
+            "code": code,
+            "u_id": user_id,
+            "la": body.lap_a_id,
+            "lb": body.lap_b_id,
+            "cat": datetime.utcnow(),
+        },
     )
     conn.commit()
     cursor.close()
@@ -77,8 +82,8 @@ async def get_shared_comparison(
     cursor = conn.cursor()
 
     cursor.execute(
-        "SELECT lap_a_id, lap_b_id FROM shared_comparisons WHERE share_code = :1",
-        [share_code],
+        "SELECT lap_id_a, lap_id_b FROM share_codes WHERE code = :code",
+        {"code": share_code},
     )
     row = cursor.fetchone()
     if not row:

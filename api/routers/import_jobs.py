@@ -1,6 +1,7 @@
 """
 Import jobs router — check import progress.
 """
+import json
 from fastapi import APIRouter, Depends, HTTPException
 import oracledb
 
@@ -26,17 +27,15 @@ async def get_import_job(
         SELECT id, status, total_laps, imported_laps, failed_laps,
                warnings_json, created_at, finished_at
         FROM import_jobs
-        WHERE id = :1 AND user_id = :2
+        WHERE id = :jid AND user_id = :u_id
         """,
-        [job_id, user_id],
+        {"jid": job_id, "u_id": user_id},
     )
     row = cursor.fetchone()
     cursor.close()
 
     if not row:
         raise HTTPException(status_code=404, detail="Import job not found")
-
-    import json
 
     warnings_raw = row[5]
     warnings_str = (
