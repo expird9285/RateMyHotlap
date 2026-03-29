@@ -57,10 +57,10 @@ async def upload_files(
     supabase_uid = user.get("id", "")
     db_user_id = resolve_or_create_user(cursor, conn, supabase_uid, user)
 
-    # ── 2. Check duplicate (by file hash) ──
+    # ── 2. Check duplicate (by sha256 hash) ──
     cursor.execute(
-        "SELECT id FROM raw_files WHERE file_hash = :1 AND user_id = :2",
-        [file_hash, db_user_id],
+        "SELECT id FROM raw_files WHERE sha256 = :hash AND user_id = :uid",
+        {"hash": file_hash, "uid": db_user_id},
     )
     if cursor.fetchone():
         raise HTTPException(status_code=409, detail="This file has already been uploaded")
@@ -81,18 +81,24 @@ async def upload_files(
         DECLARE v_id NUMBER;
         BEGIN
             INSERT INTO raw_files
-                (user_id, original_filename, file_hash,
-                 storage_key, file_size_bytes, uploaded_at)
-            VALUES (:1, :2, :3, :4, :5, :6)
+                (user_id, game, file_type, original_name,
+                 object_key, sha256, size_bytes)
+            VALUES (:uid, :game, :ftype, :fname,
+                    :okey, :sha, :fsize)
             RETURNING id INTO v_id;
-            :7 := v_id;
+            :ret := v_id;
         END;
         """,
-        [
-            db_user_id, filename, file_hash,
-            storage_key, len(file_content), datetime.utcnow(),
-            raw_id_var,
-        ],
+        {
+            "uid": db_user_id,
+            "game": game,
+            "ftype": ext,
+            "fname": filename,
+            "okey": storage_key,
+            "sha": file_hash,
+            "fsize": len(file_content),
+            "ret": raw_id_var,
+        },
     )
     raw_file_id = raw_id_var.getvalue()
 
@@ -103,13 +109,19 @@ async def upload_files(
         DECLARE v_id NUMBER;
         BEGIN
             INSERT INTO import_jobs
-                (raw_file_id, user_id, status, created_at)
-            VALUES (:1, :2, 'pending', :3)
+                (raw_file_id, user_id, game, status, created_at)
+            VALUES (:rid, :uid, :game, 'pending', :cat)
             RETURNING id INTO v_id;
-            :4 := v_id;
+            :ret := v_id;
         END;
         """,
-        [raw_file_id, db_user_id, datetime.utcnow(), job_id_var],
+        {
+            "rid": raw_file_id,
+            "uid": db_user_id,
+            "game": game,
+            "cat": datetime.utcnow(),
+            "ret": job_id_var,
+        },
     )
     job_id = job_id_var.getvalue()
     conn.commit()

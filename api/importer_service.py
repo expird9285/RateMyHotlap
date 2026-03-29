@@ -33,7 +33,8 @@ def run_import(
 
         # ── 1. Mark job as processing ──
         cursor.execute(
-            "UPDATE import_jobs SET status = 'processing' WHERE id = :1", [job_id]
+            "UPDATE import_jobs SET status = 'processing' WHERE id = :jid",
+            {"jid": job_id},
         )
         conn.commit()
 
@@ -59,11 +60,15 @@ def run_import(
                 """
                 UPDATE import_jobs
                 SET status = 'failed',
-                    warnings_json = :1,
-                    finished_at = :2
-                WHERE id = :3
+                    warnings_json = :warn,
+                    finished_at = :fat
+                WHERE id = :jid
                 """,
-                [json.dumps([parse_error]), datetime.utcnow(), job_id],
+                {
+                    "warn": json.dumps([parse_error]),
+                    "fat": datetime.utcnow(),
+                    "jid": job_id,
+                },
             )
             conn.commit()
             return
@@ -89,31 +94,32 @@ def run_import(
                         INSERT INTO laps
                             (user_id, game, track, car, lap_number,
                              lap_time_ms, is_valid, recorded_at, uploaded_at)
-                        VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9)
+                        VALUES (:uid, :game, :track, :car, :lnum,
+                                :ltime, :valid, :rec, :upl)
                         RETURNING id INTO v_id;
-                        :10 := v_id;
+                        :ret := v_id;
                     END;
                     """,
-                    [
-                        db_user_id,
-                        meta.get("game", game),
-                        meta.get("track"),
-                        meta.get("car"),
-                        meta.get("lap_number"),
-                        meta.get("lap_time_ms"),
-                        1 if meta.get("is_valid", True) else 0,
-                        datetime.utcnow(),
-                        datetime.utcnow(),
-                        lap_id_var,
-                    ],
+                    {
+                        "uid": db_user_id,
+                        "game": meta.get("game", game),
+                        "track": meta.get("track"),
+                        "car": meta.get("car"),
+                        "lnum": meta.get("lap_number"),
+                        "ltime": meta.get("lap_time_ms"),
+                        "valid": 1 if meta.get("is_valid", True) else 0,
+                        "rec": datetime.utcnow(),
+                        "upl": datetime.utcnow(),
+                        "ret": lap_id_var,
+                    },
                 )
                 lap_id = lap_id_var.getvalue()
 
                 # Insert telemetry (channels as JSON)
                 telemetry_json = json.dumps(channels)
                 cursor.execute(
-                    "INSERT INTO telemetry (lap_id, points_json) VALUES (:1, :2)",
-                    [lap_id, telemetry_json],
+                    "INSERT INTO telemetry (lap_id, points_json) VALUES (:lid, :pts)",
+                    {"lid": lap_id, "pts": telemetry_json},
                 )
 
                 imported_count += 1
@@ -134,23 +140,23 @@ def run_import(
         cursor.execute(
             """
             UPDATE import_jobs
-            SET status = :1,
-                total_laps = :2,
-                imported_laps = :3,
-                failed_laps = :4,
-                warnings_json = :5,
-                finished_at = :6
-            WHERE id = :7
+            SET status = :stat,
+                total_laps = :total,
+                imported_laps = :imp,
+                failed_laps = :fail,
+                warnings_json = :warn,
+                finished_at = :fat
+            WHERE id = :jid
             """,
-            [
-                status,
-                total,
-                imported_count,
-                failed_count,
-                json.dumps(all_warnings) if all_warnings else None,
-                datetime.utcnow(),
-                job_id,
-            ],
+            {
+                "stat": status,
+                "total": total,
+                "imp": imported_count,
+                "fail": failed_count,
+                "warn": json.dumps(all_warnings) if all_warnings else None,
+                "fat": datetime.utcnow(),
+                "jid": job_id,
+            },
         )
         conn.commit()
         print(f"✓ Import job {job_id}: {status} ({imported_count}/{total} laps)")
@@ -164,11 +170,15 @@ def run_import(
                 """
                 UPDATE import_jobs
                 SET status = 'failed',
-                    warnings_json = :1,
-                    finished_at = :2
-                WHERE id = :3
+                    warnings_json = :warn,
+                    finished_at = :fat
+                WHERE id = :jid
                 """,
-                [json.dumps([str(e)]), datetime.utcnow(), job_id],
+                {
+                    "warn": json.dumps([str(e)]),
+                    "fat": datetime.utcnow(),
+                    "jid": job_id,
+                },
             )
             conn.commit()
             cursor2.close()

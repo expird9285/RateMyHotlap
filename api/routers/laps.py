@@ -96,9 +96,9 @@ async def toggle_visibility(
         """
         UPDATE laps
         SET is_public = CASE WHEN is_public = 1 THEN 0 ELSE 1 END
-        WHERE id = :1 AND user_id = :2
+        WHERE id = :lid AND user_id = :uid
         """,
-        [lap_id, user_id],
+        {"lid": lap_id, "uid": user_id},
     )
     if cursor.rowcount == 0:
         cursor.close()
