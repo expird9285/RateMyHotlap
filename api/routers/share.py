@@ -1,161 +1,99 @@
 """
-Share codes router — create and look up public comparison links.
+Share router — create and retrieve public shared comparisons.
 """
 import json
 import secrets
-import string
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+import oracledb
 
 from api.auth import get_current_user
-from api.init_db import get_connection, release_connection
+from api.db import get_db
+from api.crud import require_user_id, get_lap_with_telemetry
 
-router = APIRouter(prefix="/api/share", tags=["Share"])
+router = APIRouter(prefix="/share", tags=["share"])
 
 
 class ShareRequest(BaseModel):
-    lap_id_a: int
-    lap_id_b: int
-    expires_days: int = 30
-
-
-def _generate_code(length: int = 8) -> str:
-    """Generate a random alphanumeric share code."""
-    chars = string.ascii_uppercase + string.digits
-    return "".join(secrets.choice(chars) for _ in range(length))
+    lap_a_id: int
+    lap_b_id: int
 
 
 @router.post("")
-async def create_share_code(
+async def create_share(
     body: ShareRequest,
     user: dict = Depends(get_current_user),
+    conn: oracledb.Connection = Depends(get_db),
 ):
-    """Create a share code for comparing two laps."""
-    supabase_user_id = user.get("id") or user.get("sub")
+    """Create a public share code for a lap comparison."""
+    cursor = conn.cursor()
+    user_id = require_user_id(cursor, user.get("id", ""))
 
-    conn = get_connection()
-    try:
-        cursor = conn.cursor()
+    # Verify both laps exist and belong to user
+    data_a = get_lap_with_telemetry(cursor, body.lap_a_id, user_id)
+    data_b = get_lap_with_telemetry(cursor, body.lap_b_id, user_id)
 
-        cursor.execute(
-            "SELECT id FROM users WHERE supabase_user_id = :1", [supabase_user_id]
-        )
-        row = cursor.fetchone()
-        if not row:
-            raise HTTPException(status_code=403, detail="User not found")
-        db_user_id = row[0]
-
-        # Verify both laps belong to user
-        for lap_id in [body.lap_id_a, body.lap_id_b]:
-            cursor.execute(
-                "SELECT id FROM laps WHERE id = :1 AND user_id = :2",
-                [lap_id, db_user_id],
-            )
-            if not cursor.fetchone():
-                raise HTTPException(
-                    status_code=404, detail=f"Lap {lap_id} not found or not owned"
-                )
-
-        code = _generate_code()
-        expires_at = datetime.utcnow() + timedelta(days=body.expires_days)
-
-        cursor.execute(
-            """
-            INSERT INTO share_codes (code, lap_id_a, lap_id_b, created_by, expires_at)
-            VALUES (:1, :2, :3, :4, :5)
-            """,
-            [code, body.lap_id_a, body.lap_id_b, db_user_id, expires_at],
-        )
-        conn.commit()
+    if not data_a or not data_b:
         cursor.close()
+        raise HTTPException(status_code=404, detail="One or both laps not found")
 
-        return {
-            "code": code,
-            "expires_at": expires_at.isoformat(),
-            "url": f"/share/{code}",
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        conn.rollback()
-        raise HTTPException(status_code=500, detail=f"Failed to create share: {str(e)}")
-    finally:
-        release_connection(conn)
-
-
-@router.get("/{code}")
-async def get_shared_comparison(code: str):
-    """
-    Look up a share code — NO authentication required.
-    Returns both laps' telemetry for comparison.
-    """
-    conn = get_connection()
-    try:
-        cursor = conn.cursor()
-
-        cursor.execute(
-            """
-            SELECT code, lap_id_a, lap_id_b, expires_at, view_count
-            FROM share_codes
-            WHERE code = :1
-            """,
-            [code],
-        )
-        row = cursor.fetchone()
-        if not row:
-            raise HTTPException(status_code=404, detail="Share code not found")
-
-        _, lap_id_a, lap_id_b, expires_at, view_count = row
-
-        if expires_at and expires_at < datetime.utcnow():
-            raise HTTPException(status_code=410, detail="Share code has expired")
-
-        # Increment view count
-        cursor.execute(
-            "UPDATE share_codes SET view_count = view_count + 1 WHERE code = :1",
-            [code],
-        )
-        conn.commit()
-
-        # Fetch both laps (no user check — shared is public)
-        def _get_lap(lap_id):
-            cursor.execute(
-                """
-                SELECT l.id, l.game, l.track, l.car, l.lap_number,
-                       l.lap_time_ms, l.is_valid, t.points_json
-                FROM laps l
-                JOIN telemetry t ON l.id = t.lap_id
-                WHERE l.id = :1
-                """,
-                [lap_id],
-            )
-            r = cursor.fetchone()
-            if not r:
-                return None
-            pts_raw = r[7]
-            pts = pts_raw.read() if hasattr(pts_raw, "read") else pts_raw
-            return {
-                "id": r[0], "game": r[1], "track": r[2], "car": r[3],
-                "lap_number": r[4], "lap_time_ms": r[5], "is_valid": r[6],
-                "telemetry": json.loads(pts),
-            }
-
-        lap_a = _get_lap(lap_id_a)
-        lap_b = _get_lap(lap_id_b)
-
+    # Check for existing share
+    cursor.execute(
+        """
+        SELECT share_code FROM shared_comparisons
+        WHERE user_id = :1 AND lap_a_id = :2 AND lap_b_id = :3
+        """,
+        [user_id, body.lap_a_id, body.lap_b_id],
+    )
+    existing = cursor.fetchone()
+    if existing:
         cursor.close()
+        return {"share_code": existing[0]}
 
-        return {
-            "code": code,
-            "view_count": (view_count or 0) + 1,
-            "lap_a": lap_a,
-            "lap_b": lap_b,
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Share lookup error: {str(e)}")
-    finally:
-        release_connection(conn)
+    # Create new share code
+    code = secrets.token_urlsafe(8)
+    cursor.execute(
+        """
+        INSERT INTO shared_comparisons
+            (share_code, user_id, lap_a_id, lap_b_id, created_at)
+        VALUES (:1, :2, :3, :4, :5)
+        """,
+        [code, user_id, body.lap_a_id, body.lap_b_id, datetime.utcnow()],
+    )
+    conn.commit()
+    cursor.close()
+
+    return {"share_code": code}
+
+
+@router.get("/{share_code}")
+async def get_shared_comparison(
+    share_code: str,
+    conn: oracledb.Connection = Depends(get_db),
+):
+    """Retrieve a shared comparison (no auth required)."""
+    cursor = conn.cursor()
+
+    cursor.execute(
+        "SELECT lap_a_id, lap_b_id FROM shared_comparisons WHERE share_code = :1",
+        [share_code],
+    )
+    row = cursor.fetchone()
+    if not row:
+        cursor.close()
+        raise HTTPException(status_code=404, detail="Share code not found")
+
+    lap_a_id, lap_b_id = row
+    data_a = get_lap_with_telemetry(cursor, lap_a_id)
+    data_b = get_lap_with_telemetry(cursor, lap_b_id)
+    cursor.close()
+
+    if not data_a or not data_b:
+        raise HTTPException(status_code=404, detail="Shared laps no longer available")
+
+    return {
+        "lap_a": data_a,
+        "lap_b": data_b,
+    }

@@ -7,6 +7,7 @@ from typing import Optional
 
 from api.init_db import get_connection, release_connection
 from api.importers.acc_ld import parse_ld_bytes
+from api.importers.lmu_duckdb import parse_duckdb_bytes
 
 
 def run_import(
@@ -26,6 +27,7 @@ def run_import(
      4. Update job → success / failed / partial_success
     """
     conn = get_connection()
+    cursor = None
     try:
         cursor = conn.cursor()
 
@@ -42,10 +44,11 @@ def run_import(
 
         try:
             if file_ext == "ld":
-                normalized_laps = parse_ld_bytes(file_content, ldx_content=ldx_content)
+                normalized_laps = parse_ld_bytes(
+                    file_content, ldx_content=ldx_content
+                )
             elif file_ext == "duckdb":
-                # LMU parser is still a stub — mark accordingly
-                all_warnings.append("LMU DuckDB import is not yet implemented.")
+                normalized_laps = parse_duckdb_bytes(file_content)
             else:
                 parse_error = f"Unsupported file extension: .{file_ext}"
         except Exception as e:
@@ -75,7 +78,6 @@ def run_import(
                 channels = lap["channels"]
                 source = lap.get("source", {})
 
-                # Collect warnings
                 all_warnings.extend(source.get("import_warnings", []))
 
                 # Insert lap
@@ -106,6 +108,7 @@ def run_import(
                     ],
                 )
                 lap_id = lap_id_var.getvalue()
+
                 # Insert telemetry (channels as JSON)
                 telemetry_json = json.dumps(channels)
                 cursor.execute(
@@ -173,8 +176,9 @@ def run_import(
             pass
         raise
     finally:
-        try:
-            cursor.close()
-        except Exception:
-            pass
+        if cursor is not None:
+            try:
+                cursor.close()
+            except Exception:
+                pass
         release_connection(conn)

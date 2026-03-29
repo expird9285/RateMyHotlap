@@ -1,112 +1,304 @@
 "use client";
+
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
-import { fetchSharedComparison } from "@/utils/api";
-import TelemetryChart from "@/components/TelemetryChart";
 import { motion } from "framer-motion";
-import { Eye, Gauge } from "lucide-react";
-import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid, ReferenceLine } from "recharts";
+import { Gauge, Trophy, Clock, ExternalLink } from "lucide-react";
+import { TelemetryChart } from "@/components/TelemetryChart";
+import { formatLapTime, formatDelta, gameBadgeColor } from "@/utils/format";
 
-function formatLapTime(ms: number | null): string {
-  if (!ms) return "--:--.---";
-  const mins = Math.floor(ms / 60000);
-  const secs = Math.floor((ms % 60000) / 1000);
-  const millis = ms % 1000;
-  return `${mins}:${secs.toString().padStart(2, "0")}.${millis.toString().padStart(3, "0")}`;
-}
-
-export default function SharePage() {
-  const { code } = useParams<{ code: string }>();
+export default function SharedPage() {
+  const { code } = useParams();
   const [data, setData] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
+  const [fetching, setFetching] = useState(true);
+  const [error, setError] = useState(false);
 
   useEffect(() => {
     if (!code) return;
-    fetchSharedComparison(code)
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+    fetch(`${apiUrl}/share/${code}`)
+      .then((r) => {
+        if (!r.ok) throw new Error();
+        return r.json();
+      })
       .then(setData)
-      .catch(e => setError(e?.response?.data?.detail || "Share code not found or expired"))
-      .finally(() => setLoading(false));
+      .catch(() => setError(true))
+      .finally(() => setFetching(false));
   }, [code]);
 
-  if (loading) {
-    return <div className="min-h-screen flex items-center justify-center"><div className="w-8 h-8 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" /></div>;
-  }
-
-  if (error || !data) {
+  if (fetching) {
     return (
-      <div className="min-h-screen flex flex-col items-center justify-center">
-        <Gauge className="text-zinc-700 mb-4" size={48} />
-        <p className="text-red-400 mb-2 text-lg">{error || "Not found"}</p>
-        <p className="text-zinc-500 text-sm">This share link may have expired or is invalid.</p>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          minHeight: "80vh",
+          flexDirection: "column",
+          gap: 12,
+        }}
+      >
+        <div
+          style={{
+            width: 32,
+            height: 32,
+            border: "3px solid var(--border)",
+            borderTopColor: "var(--accent)",
+            borderRadius: "50%",
+            animation: "spin 0.8s linear infinite",
+          }}
+        />
+        <span style={{ color: "var(--text-muted)", fontSize: 14 }}>
+          공유된 비교를 불러오는 중...
+        </span>
+        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
       </div>
     );
   }
 
-  const { lap_a, lap_b, view_count } = data;
-  const timeDiff = (lap_a?.lap_time_ms || 0) - (lap_b?.lap_time_ms || 0);
+  if (error || !data) {
+    return (
+      <div style={{ maxWidth: 500, margin: "80px auto", padding: 20 }}>
+        <div
+          className="card-static"
+          style={{
+            padding: "60px 40px",
+            textAlign: "center",
+          }}
+        >
+          <Gauge
+            size={48}
+            style={{ margin: "0 auto 16px", opacity: 0.2 }}
+          />
+          <h2
+            style={{
+              margin: "0 0 8px",
+              fontSize: 18,
+              fontWeight: 700,
+              color: "var(--text-primary)",
+            }}
+          >
+            공유 링크를 찾을 수 없습니다
+          </h2>
+          <p
+            style={{
+              margin: 0,
+              fontSize: 14,
+              color: "var(--text-secondary)",
+            }}
+          >
+            만료되었거나 잘못된 링크일 수 있습니다.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  const { lap_a, lap_b } = data;
+  const deltaMs = lap_a.lap_time_ms - lap_b.lap_time_ms;
+  const aFaster = deltaMs <= 0;
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8">
-      {/* Public header */}
-      <div className="flex items-center justify-between mb-8">
-        <div className="flex items-center gap-2">
-          <Gauge className="text-blue-400" size={24} />
-          <span className="text-xl font-bold bg-gradient-to-r from-blue-400 to-emerald-400 bg-clip-text text-transparent">
-            RateMyHotlap
-          </span>
-          <span className="text-zinc-600 text-sm ml-4">Shared Comparison</span>
+    <div style={{ maxWidth: 1000, margin: "0 auto", padding: "24px 20px" }}>
+      {/* Header */}
+      <motion.div
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 10,
+          marginBottom: 24,
+        }}
+      >
+        <div
+          style={{
+            width: 36,
+            height: 36,
+            borderRadius: "var(--radius-md)",
+            background:
+              "linear-gradient(135deg, var(--accent), var(--accent-dark))",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          <Gauge size={20} color="#fff" />
         </div>
-        <div className="flex items-center gap-2 text-zinc-500 text-sm">
-          <Eye size={14} /> {view_count} views
+        <div>
+          <h1
+            style={{
+              margin: 0,
+              fontSize: 20,
+              fontWeight: 700,
+              color: "var(--text-primary)",
+            }}
+          >
+            RateMyHotlap — 공유된 비교
+          </h1>
+          <p style={{ margin: 0, fontSize: 13, color: "var(--text-muted)" }}>
+            {lap_a.track || "Unknown Track"} · {lap_a.game}
+          </p>
         </div>
-      </div>
+      </motion.div>
 
-      {/* Lap cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
-        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
-          className="bg-zinc-900 border border-blue-800/50 rounded-2xl p-5">
-          <div className="text-xs text-blue-400 font-semibold mb-1 uppercase">Lap A</div>
-          <div className="font-bold">{lap_a?.track}</div>
-          <div className="text-zinc-400 text-sm">{lap_a?.car}</div>
-          <div className="font-mono text-2xl text-emerald-400 mt-2">{formatLapTime(lap_a?.lap_time_ms)}</div>
-        </motion.div>
+      {/* Comparison Cards */}
+      <motion.div
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.1 }}
+        style={{
+          display: "grid",
+          gridTemplateColumns: "1fr 1fr",
+          gap: 16,
+          marginBottom: 20,
+        }}
+      >
+        {[
+          { label: "A", lap: lap_a, faster: aFaster },
+          { label: "B", lap: lap_b, faster: !aFaster },
+        ].map(({ label, lap, faster }) => {
+          const badge = gameBadgeColor(lap.game);
+          return (
+            <div
+              key={label}
+              className="card-static"
+              style={{
+                padding: "20px 22px",
+                border: faster
+                  ? "1.5px solid var(--accent)"
+                  : "1px solid var(--border-light)",
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  marginBottom: 8,
+                }}
+              >
+                <div
+                  style={{
+                    width: 28,
+                    height: 28,
+                    borderRadius: "50%",
+                    background: faster ? "var(--accent)" : "var(--border)",
+                    color: faster ? "#fff" : "var(--text-secondary)",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    fontSize: 13,
+                    fontWeight: 700,
+                  }}
+                >
+                  {label}
+                </div>
+                <span
+                  className="badge"
+                  style={{ background: badge.bg, color: badge.text }}
+                >
+                  {lap.game}
+                </span>
+                {faster && (
+                  <Trophy size={14} color="var(--secondary)" style={{ marginLeft: "auto" }} />
+                )}
+              </div>
+              <p
+                style={{
+                  margin: "0 0 4px",
+                  fontSize: 14,
+                  fontWeight: 600,
+                  color: "var(--text-primary)",
+                }}
+              >
+                {lap.car || "Unknown Car"}
+              </p>
+              <p
+                style={{
+                  margin: 0,
+                  fontSize: 26,
+                  fontWeight: 800,
+                  fontVariantNumeric: "tabular-nums",
+                  color: faster ? "var(--accent)" : "var(--text-primary)",
+                }}
+              >
+                {formatLapTime(lap.lap_time_ms)}
+              </p>
+            </div>
+          );
+        })}
+      </motion.div>
 
-        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }}
-          className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 flex flex-col items-center justify-center">
-          <div className="text-xs text-zinc-500 uppercase mb-1">Difference</div>
-          <div className={`font-mono text-3xl font-bold ${timeDiff > 0 ? "text-red-400" : "text-emerald-400"}`}>
-            {timeDiff > 0 ? "+" : ""}{(timeDiff / 1000).toFixed(3)}s
-          </div>
-        </motion.div>
+      {/* Delta */}
+      <motion.div
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.15 }}
+        className="card-static"
+        style={{
+          padding: "14px 22px",
+          marginBottom: 20,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: 12,
+        }}
+      >
+        <Clock size={16} color="var(--text-muted)" />
+        <span style={{ fontSize: 14, color: "var(--text-secondary)" }}>
+          시간차:
+        </span>
+        <span
+          style={{
+            fontSize: 18,
+            fontWeight: 700,
+            fontVariantNumeric: "tabular-nums",
+            color: aFaster ? "var(--accent)" : "var(--error)",
+          }}
+        >
+          {formatDelta(deltaMs)}s
+        </span>
+      </motion.div>
 
-        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}
-          className="bg-zinc-900 border border-orange-800/50 rounded-2xl p-5">
-          <div className="text-xs text-orange-400 font-semibold mb-1 uppercase">Lap B</div>
-          <div className="font-bold">{lap_b?.track}</div>
-          <div className="text-zinc-400 text-sm">{lap_b?.car}</div>
-          <div className="font-mono text-2xl text-emerald-400 mt-2">{formatLapTime(lap_b?.lap_time_ms)}</div>
-        </motion.div>
-      </div>
+      {/* Chart */}
+      <motion.div
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.2 }}
+      >
+        <TelemetryChart
+          telemetry={lap_a.telemetry}
+          overlayTelemetry={lap_b.telemetry}
+          overlayLabel="B"
+          channels={["speed", "throttle", "brake"]}
+          height={400}
+        />
+      </motion.div>
 
-      {/* Overlay charts */}
-      {lap_a?.telemetry && lap_b?.telemetry && ["speed", "throttle", "brake"].map(ch => (
-        <motion.div key={ch} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
-          className="bg-zinc-900/50 border border-zinc-800 rounded-2xl p-6 mb-4">
-          <TelemetryChart
-            channels={lap_a.telemetry}
-            overlayChannels={lap_b.telemetry}
-            overlayLabel="B"
-            visibleChannels={[ch]}
-            height={250}
-            title={`${ch.charAt(0).toUpperCase() + ch.slice(1)} — A (solid) vs B (dashed)`}
-          />
-        </motion.div>
-      ))}
-
-      <div className="text-center mt-12 text-zinc-600 text-sm">
-        <a href="/" className="text-blue-400 hover:underline">Create your own analysis →</a>
-      </div>
+      {/* CTA */}
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ delay: 0.3 }}
+        style={{ textAlign: "center", marginTop: 32 }}
+      >
+        <a
+          href="/"
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 6,
+            color: "var(--accent)",
+            fontSize: 14,
+            fontWeight: 500,
+            textDecoration: "none",
+          }}
+        >
+          RateMyHotlap에서 나만의 텔레메트리 분석하기
+          <ExternalLink size={14} />
+        </a>
+      </motion.div>
     </div>
   );
 }
