@@ -1,29 +1,27 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import { AuthProvider } from "@/components/AuthProvider";
-import Navbar from "@/components/Navbar";
+import { Navbar } from "@/components/Navbar";
 
 export const metadata: Metadata = {
-  title: "RateMyHotlap — Racing Telemetry Analysis",
-  description: "Upload and analyze your racing simulator telemetry with AI-powered insights",
+  title: "RateMyHotlap — 텔레메트리 분석",
+  description:
+    "ACC, LMU 레이싱 시뮬레이터 텔레메트리 분석 및 비교 플랫폼",
 };
 
 export default function RootLayout({
   children,
-}: Readonly<{
+}: {
   children: React.ReactNode;
-}>) {
+}) {
   return (
-    <html lang="en" className="h-full dark">
-      <head>
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
-        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-      </head>
-      <body className="min-h-full flex flex-col bg-zinc-950 text-zinc-100 antialiased" style={{ fontFamily: "'Inter', system-ui, sans-serif" }}>
+    <html lang="ko">
+      <body>
         <AuthProvider>
           <Navbar />
-          <main className="flex-1">{children}</main>
+          <main style={{ minHeight: "calc(100vh - 64px)", paddingTop: "64px" }}>
+            {children}
+          </main>
         </AuthProvider>
       </body>
     </html>

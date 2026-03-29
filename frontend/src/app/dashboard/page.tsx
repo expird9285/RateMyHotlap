@@ -1,259 +1,579 @@
 "use client";
-import { useEffect, useState, useRef, useCallback } from "react";
-import { useAuth } from "@/components/AuthProvider";
-import { useRouter } from "next/navigation";
-import { motion, AnimatePresence } from "framer-motion";
-import { Upload, Search, Filter, Clock, Trophy, ChevronRight, GitCompare } from "lucide-react";
-import { fetchLaps, uploadTelemetry, fetchImportJob, type Lap, type ImportJob } from "@/utils/api";
-import UploadModal from "@/components/UploadModal";
 
-function formatLapTime(ms: number | null): string {
-  if (!ms) return "--:--.---";
-  const mins = Math.floor(ms / 60000);
-  const secs = Math.floor((ms % 60000) / 1000);
-  const millis = ms % 1000;
-  return `${mins}:${secs.toString().padStart(2, "0")}.${millis.toString().padStart(3, "0")}`;
+import { useEffect, useState, useMemo } from "react";
+import { useRouter } from "next/navigation";
+import { motion } from "framer-motion";
+import {
+  Timer,
+  Trophy,
+  GitCompare,
+  Filter,
+  ChevronDown,
+  ChevronRight,
+  Gauge,
+  TrendingUp,
+} from "lucide-react";
+import { useAuth } from "@/components/AuthProvider";
+import api from "@/utils/api";
+import { formatLapTime, gameBadgeColor, timeAgo } from "@/utils/format";
+
+interface Lap {
+  id: number;
+  game: string;
+  track: string;
+  car: string;
+  lap_number: number;
+  lap_time_ms: number;
+  is_valid: number;
+  is_public: number;
+  recorded_at: string;
 }
 
-export default function Dashboard() {
-  const { session, loading: authLoading } = useAuth();
+export default function DashboardPage() {
+  const { session, loading } = useAuth();
   const router = useRouter();
 
   const [laps, setLaps] = useState<Lap[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [search, setSearch] = useState("");
-  const [gameFilter, setGameFilter] = useState("");
-
-  // Upload state
-  const [uploading, setUploading] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState(0);
-  const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
-  const [importJob, setImportJob] = useState<ImportJob | null>(null);
-
-  // Compare selection
+  const [fetching, setFetching] = useState(true);
+  const [filterGame, setFilterGame] = useState<string>("");
+  const [filterTrack, setFilterTrack] = useState<string>("");
   const [selectedLaps, setSelectedLaps] = useState<number[]>([]);
+  const [showFilters, setShowFilters] = useState(false);
 
   useEffect(() => {
-    if (!authLoading && !session) router.push("/");
-  }, [authLoading, session, router]);
-
-  const loadLaps = useCallback(async () => {
-    setLoading(true);
-    try {
-      const data = await fetchLaps({
-        game: gameFilter || undefined,
-        search: search || undefined,
-      });
-      setLaps(data);
-    } catch (e) {
-      console.error("Failed to load laps:", e);
-    } finally {
-      setLoading(false);
+    if (!loading && !session) {
+      router.push("/");
     }
-  }, [gameFilter, search]);
+  }, [session, loading, router]);
 
   useEffect(() => {
-    if (session) loadLaps();
-  }, [session, loadLaps]);
+    if (!session) return;
+    setFetching(true);
+    api
+      .get("/laps")
+      .then((r) => setLaps(r.data))
+      .catch(() => {})
+      .finally(() => setFetching(false));
+  }, [session]);
 
-  const handleUpload = async (file: File, ldxFile: File | null) => {
-    setUploading(true);
-    setImportJob(null);
-    setUploadProgress(0);
-    try {
-      const result = await uploadTelemetry(file, ldxFile, setUploadProgress);
-      // Poll import job status
-      const poll = async () => {
-        for (let i = 0; i < 30; i++) {
-          await new Promise((r) => setTimeout(r, 1000));
-          try {
-            const job = await fetchImportJob(result.job_id);
-            setImportJob(job);
-            if (["success", "failed", "partial_success"].includes(job.status)) {
-              loadLaps();
-              setIsUploadModalOpen(false);
-              return;
-            }
-          } catch { break; }
-        }
-        setIsUploadModalOpen(false);
-      };
-      poll();
-    } catch (err) {
-      setImportJob({ id: 0, status: "failed", total_laps: 0, imported_laps: 0, failed_laps: 0, warnings: ["Upload failed. Please try again."] });
-      setIsUploadModalOpen(false);
-    } finally {
-      setUploading(false);
+  // Distinct values for filters
+  const games = useMemo(
+    () => [...new Set(laps.map((l) => l.game))],
+    [laps]
+  );
+  const tracks = useMemo(() => {
+    const filtered = filterGame
+      ? laps.filter((l) => l.game === filterGame)
+      : laps;
+    return [...new Set(filtered.map((l) => l.track).filter(Boolean))];
+  }, [laps, filterGame]);
+
+  const filteredLaps = useMemo(() => {
+    let result = laps;
+    if (filterGame) result = result.filter((l) => l.game === filterGame);
+    if (filterTrack) result = result.filter((l) => l.track === filterTrack);
+    return result;
+  }, [laps, filterGame, filterTrack]);
+
+  // Stats
+  const bestLap = useMemo(() => {
+    const valid = filteredLaps.filter((l) => l.is_valid && l.lap_time_ms > 0);
+    return valid.length > 0
+      ? valid.reduce((a, b) => (a.lap_time_ms < b.lap_time_ms ? a : b))
+      : null;
+  }, [filteredLaps]);
+
+  const toggleSelect = (id: number) => {
+    setSelectedLaps((prev) => {
+      if (prev.includes(id)) return prev.filter((x) => x !== id);
+      if (prev.length >= 2) return [prev[1], id];
+      return [...prev, id];
+    });
+  };
+
+  const handleCompare = () => {
+    if (selectedLaps.length === 2) {
+      router.push(
+        `/compare?lap_a=${selectedLaps[0]}&lap_b=${selectedLaps[1]}`
+      );
     }
   };
 
-  const toggleLapSelect = (id: number) => {
-    setSelectedLaps((prev) =>
-      prev.includes(id) ? prev.filter((x) => x !== id) : prev.length < 2 ? [...prev, id] : [prev[1], id]
-    );
-  };
-
-  const canCompare = selectedLaps.length === 2;
-
-  if (authLoading || !session) {
-    return <div className="min-h-screen flex items-center justify-center"><div className="w-8 h-8 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" /></div>;
-  }
+  if (loading || !session) return null;
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8">
-      {/* Top bar: Upload + Compare */}
-      <div className="flex flex-col sm:flex-row gap-4 mb-8">
-        <div className="flex-1">
-          <h2 className="text-2xl font-bold mb-1">My Laps</h2>
-          <p className="text-zinc-500 text-sm">{laps.length} laps uploaded</p>
-        </div>
-        <div className="flex gap-3">
-          {canCompare && (
-            <button
-              onClick={() => router.push(`/compare?a=${selectedLaps[0]}&b=${selectedLaps[1]}`)}
-              className="flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 rounded-xl text-sm font-semibold transition-all shadow-lg hover:shadow-emerald-500/20"
-            >
-              <GitCompare size={16} /> Compare Selected
-            </button>
-          )}
-          <button
-            onClick={() => setIsUploadModalOpen(true)}
-            className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-500 rounded-xl text-sm font-semibold transition-all shadow-lg hover:shadow-blue-500/20"
-          >
-            <Upload size={16} /> Upload Laps
-          </button>
-        </div>
-      </div>
-      
-      <UploadModal 
-        isOpen={isUploadModalOpen} 
-        onClose={() => setIsUploadModalOpen(false)} 
-        onUpload={handleUpload} 
-        uploading={uploading} 
-        uploadProgress={uploadProgress} 
-      />
+    <div style={{ maxWidth: 1100, margin: "0 auto", padding: "24px 20px" }}>
+      {/* Header */}
+      <motion.div
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        style={{ marginBottom: 24 }}
+      >
+        <h1
+          style={{
+            fontSize: 24,
+            fontWeight: 700,
+            marginBottom: 4,
+            color: "var(--text-primary)",
+          }}
+        >
+          대시보드
+        </h1>
+        <p style={{ color: "var(--text-secondary)", fontSize: 14, margin: 0 }}>
+          업로드된 랩 데이터를 확인하고 비교해 보세요
+        </p>
+      </motion.div>
 
-      {/* Import job status */}
-      <AnimatePresence>
-        {importJob && (
-          <motion.div
-            initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }}
-            className={`mb-6 p-4 rounded-xl border text-sm ${
-              importJob.status === "success" ? "bg-emerald-950/50 border-emerald-800 text-emerald-300"
-              : importJob.status === "failed" ? "bg-red-950/50 border-red-800 text-red-300"
-              : importJob.status === "partial_success" ? "bg-yellow-950/50 border-yellow-800 text-yellow-300"
-              : "bg-zinc-900 border-zinc-700 text-zinc-300"
-            }`}
+      {/* Stats Cards */}
+      <motion.div
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.1 }}
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+          gap: 16,
+          marginBottom: 24,
+        }}
+      >
+        <div className="card-static" style={{ padding: "20px 22px" }}>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              marginBottom: 12,
+            }}
           >
-            <div className="font-semibold mb-1">
-              Import {importJob.status === "success" ? "Complete ✓" : importJob.status === "failed" ? "Failed ✗" : importJob.status === "processing" ? "Processing..." : importJob.status}
+            <div
+              style={{
+                width: 36,
+                height: 36,
+                borderRadius: "var(--radius-sm)",
+                background: "var(--accent-lighter)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              <Gauge size={18} color="var(--accent)" />
             </div>
-            {importJob.imported_laps != null && <p>Imported: {importJob.imported_laps} laps</p>}
-            {importJob.warnings?.length > 0 && (
-              <ul className="mt-2 space-y-1 text-xs opacity-80">{importJob.warnings.map((w, i) => <li key={i}>⚠ {w}</li>)}</ul>
-            )}
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* Filters */}
-      <div className="flex flex-wrap gap-3 mb-6">
-        <div className="relative flex-1 min-w-[200px]">
-          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
-          <input
-            value={search} onChange={(e) => setSearch(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && loadLaps()}
-            placeholder="Search tracks, cars..."
-            className="w-full pl-10 pr-4 py-2.5 bg-zinc-900 border border-zinc-800 rounded-xl text-sm placeholder:text-zinc-600 focus:outline-none focus:ring-1 focus:ring-blue-500/50 focus:border-blue-500/50"
-          />
-        </div>
-        {["", "ACC"].map((g) => (
-          <button
-            key={g}
-            onClick={() => { setGameFilter(g); setTimeout(loadLaps, 50); }}
-            className={`px-4 py-2.5 rounded-xl text-sm font-medium transition-all ${
-              gameFilter === g ? "bg-blue-600 text-white" : "bg-zinc-900 border border-zinc-800 text-zinc-400 hover:text-white"
-            }`}
+            <span
+              style={{
+                fontSize: 13,
+                color: "var(--text-secondary)",
+                fontWeight: 500,
+              }}
+            >
+              총 랩 수
+            </span>
+          </div>
+          <p
+            style={{
+              fontSize: 28,
+              fontWeight: 800,
+              margin: 0,
+              color: "var(--text-primary)",
+            }}
           >
-            {g || "All Games"}
-          </button>
-        ))}
-      </div>
-
-      {/* Lap list */}
-      {loading ? (
-        <div className="flex justify-center py-20"><div className="w-8 h-8 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" /></div>
-      ) : laps.length === 0 ? (
-        <div className="text-center py-20">
-          <Upload className="mx-auto mb-4 text-zinc-700" size={48} />
-          <p className="text-zinc-500 mb-2">No laps yet</p>
-          <p className="text-zinc-600 text-sm">Upload an ACC .ld file to get started</p>
+            {filteredLaps.length}
+          </p>
         </div>
-      ) : (
-        <div className="space-y-2">
-          {laps.map((lap, i) => (
-            <motion.div
-              key={lap.id}
-              initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.03 }}
-              onClick={() => toggleLapSelect(lap.id)}
-              className={`group flex items-center gap-4 p-4 rounded-xl border cursor-pointer transition-all ${
-                selectedLaps.includes(lap.id)
-                  ? "bg-blue-950/40 border-blue-700 ring-1 ring-blue-500/30"
-                  : "bg-zinc-900/50 border-zinc-800 hover:border-zinc-700 hover:bg-zinc-900"
-              }`}
+
+        <div className="card-static" style={{ padding: "20px 22px" }}>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              marginBottom: 12,
+            }}
+          >
+            <div
+              style={{
+                width: 36,
+                height: 36,
+                borderRadius: "var(--radius-sm)",
+                background: "#fef3c7",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
             >
-              {/* Selection indicator */}
-              <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-all ${
-                selectedLaps.includes(lap.id) ? "border-blue-400 bg-blue-500" : "border-zinc-700"
-              }`}>
-                {selectedLaps.includes(lap.id) && <div className="w-2 h-2 rounded-full bg-white" />}
-              </div>
-
-              {/* Game badge */}
-              <span className={`px-2 py-0.5 rounded text-xs font-bold flex-shrink-0 ${
-                lap.game === "ACC" ? "bg-red-900/50 text-red-400" : "bg-blue-900/50 text-blue-400"
-              }`}>{lap.game}</span>
-
-              {/* Track + Car */}
-              <div className="flex-1 min-w-0">
-                <div className="font-medium truncate">{lap.track || "Unknown Track"}</div>
-                <div className="text-zinc-500 text-sm truncate">{lap.car || "Unknown Car"}</div>
-              </div>
-
-              {/* Lap time */}
-              <div className="text-right flex-shrink-0">
-                <div className="font-mono text-lg font-semibold text-emerald-400">{formatLapTime(lap.lap_time_ms)}</div>
-                <div className="text-zinc-600 text-xs">
-                  {lap.uploaded_at ? new Date(lap.uploaded_at).toLocaleDateString() : ""}
-                </div>
-              </div>
-
-              {/* View detail arrow */}
-              <button
-                onClick={(e) => { e.stopPropagation(); router.push(`/laps/${lap.id}`); }}
-                className="p-2 rounded-lg hover:bg-zinc-800 text-zinc-600 hover:text-white transition-all opacity-0 group-hover:opacity-100"
-              >
-                <ChevronRight size={18} />
-              </button>
-            </motion.div>
-          ))}
-        </div>
-      )}
-
-      {selectedLaps.length > 0 && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-zinc-900 border border-zinc-700 rounded-2xl px-6 py-3 shadow-2xl flex items-center gap-4 text-sm">
-          <span className="text-zinc-400">{selectedLaps.length}/2 laps selected</span>
-          {canCompare && (
-            <button
-              onClick={() => router.push(`/compare?a=${selectedLaps[0]}&b=${selectedLaps[1]}`)}
-              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 rounded-lg font-semibold transition-all"
+              <Trophy size={18} color="#f59e0b" />
+            </div>
+            <span
+              style={{
+                fontSize: 13,
+                color: "var(--text-secondary)",
+                fontWeight: 500,
+              }}
             >
-              Compare →
-            </button>
+              베스트 랩
+            </span>
+          </div>
+          <p
+            style={{
+              fontSize: 28,
+              fontWeight: 800,
+              margin: 0,
+              color: "var(--accent)",
+            }}
+          >
+            {bestLap ? formatLapTime(bestLap.lap_time_ms) : "--:--.---"}
+          </p>
+          {bestLap && (
+            <p
+              style={{
+                fontSize: 12,
+                color: "var(--text-muted)",
+                margin: "4px 0 0",
+              }}
+            >
+              {bestLap.track} · {bestLap.car}
+            </p>
           )}
-          <button onClick={() => setSelectedLaps([])} className="text-zinc-500 hover:text-white transition-colors">Clear</button>
         </div>
-      )}
+
+        <div className="card-static" style={{ padding: "20px 22px" }}>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              marginBottom: 12,
+            }}
+          >
+            <div
+              style={{
+                width: 36,
+                height: 36,
+                borderRadius: "var(--radius-sm)",
+                background: "#ede9fe",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              <TrendingUp size={18} color="#8b5cf6" />
+            </div>
+            <span
+              style={{
+                fontSize: 13,
+                color: "var(--text-secondary)",
+                fontWeight: 500,
+              }}
+            >
+              트랙 수
+            </span>
+          </div>
+          <p
+            style={{
+              fontSize: 28,
+              fontWeight: 800,
+              margin: 0,
+              color: "var(--text-primary)",
+            }}
+          >
+            {new Set(filteredLaps.map((l) => l.track).filter(Boolean)).size}
+          </p>
+        </div>
+      </motion.div>
+
+      {/* Filters + Compare */}
+      <motion.div
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.15 }}
+        className="card-static"
+        style={{
+          padding: "14px 20px",
+          marginBottom: 16,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          flexWrap: "wrap",
+          gap: 10,
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          <button
+            className="btn-secondary"
+            style={{ padding: "6px 14px", fontSize: 13 }}
+            onClick={() => setShowFilters(!showFilters)}
+          >
+            <Filter size={14} />
+            필터
+            <ChevronDown
+              size={14}
+              style={{
+                transform: showFilters ? "rotate(180deg)" : "none",
+                transition: "transform 0.2s",
+              }}
+            />
+          </button>
+
+          {showFilters && (
+            <>
+              <select
+                className="input"
+                style={{
+                  width: "auto",
+                  padding: "6px 12px",
+                  fontSize: 13,
+                }}
+                value={filterGame}
+                onChange={(e) => {
+                  setFilterGame(e.target.value);
+                  setFilterTrack("");
+                }}
+              >
+                <option value="">전체 게임</option>
+                {games.map((g) => (
+                  <option key={g} value={g}>
+                    {g}
+                  </option>
+                ))}
+              </select>
+              <select
+                className="input"
+                style={{
+                  width: "auto",
+                  padding: "6px 12px",
+                  fontSize: 13,
+                }}
+                value={filterTrack}
+                onChange={(e) => setFilterTrack(e.target.value)}
+              >
+                <option value="">전체 트랙</option>
+                {tracks.map((t) => (
+                  <option key={t} value={t}>
+                    {t}
+                  </option>
+                ))}
+              </select>
+            </>
+          )}
+        </div>
+
+        {selectedLaps.length === 2 && (
+          <button
+            className="btn-primary"
+            style={{ padding: "8px 16px", fontSize: 13 }}
+            onClick={handleCompare}
+          >
+            <GitCompare size={14} />
+            비교하기
+          </button>
+        )}
+        {selectedLaps.length > 0 && selectedLaps.length < 2 && (
+          <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
+            비교할 랩을 1개 더 선택하세요
+          </span>
+        )}
+      </motion.div>
+
+      {/* Laps List */}
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ delay: 0.2 }}
+      >
+        {fetching ? (
+          <div
+            className="card-static"
+            style={{
+              padding: 60,
+              textAlign: "center",
+              color: "var(--text-muted)",
+            }}
+          >
+            <div
+              style={{
+                width: 28,
+                height: 28,
+                border: "3px solid var(--border)",
+                borderTopColor: "var(--accent)",
+                borderRadius: "50%",
+                animation: "spin 0.8s linear infinite",
+                margin: "0 auto 12px",
+              }}
+            />
+            데이터를 불러오는 중...
+            <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+          </div>
+        ) : filteredLaps.length === 0 ? (
+          <div
+            className="card-static"
+            style={{
+              padding: 60,
+              textAlign: "center",
+              color: "var(--text-muted)",
+            }}
+          >
+            <Gauge
+              size={40}
+              style={{ margin: "0 auto 12px", opacity: 0.3 }}
+            />
+            <p style={{ margin: 0, fontWeight: 500 }}>
+              아직 업로드된 랩이 없습니다
+            </p>
+            <p style={{ margin: "4px 0 0", fontSize: 13 }}>
+              상단의 업로드 버튼으로 텔레메트리 파일을 추가해 보세요
+            </p>
+          </div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {filteredLaps.map((lap, i) => {
+              const selected = selectedLaps.includes(lap.id);
+              const badge = gameBadgeColor(lap.game);
+              return (
+                <motion.div
+                  key={lap.id}
+                  initial={{ opacity: 0, y: 6 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: i * 0.03 }}
+                  className="card"
+                  style={{
+                    padding: "16px 20px",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 16,
+                    cursor: "pointer",
+                    border: selected
+                      ? "1.5px solid var(--accent)"
+                      : "1px solid var(--border-light)",
+                    background: selected
+                      ? "var(--accent-lighter)"
+                      : "var(--bg-card)",
+                  }}
+                  onClick={() => toggleSelect(lap.id)}
+                >
+                  {/* Checkbox */}
+                  <div
+                    style={{
+                      width: 20,
+                      height: 20,
+                      borderRadius: 6,
+                      border: selected
+                        ? "2px solid var(--accent)"
+                        : "2px solid var(--border)",
+                      background: selected ? "var(--accent)" : "transparent",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      flexShrink: 0,
+                      transition: "all 0.15s ease",
+                    }}
+                  >
+                    {selected && (
+                      <svg
+                        width="12"
+                        height="12"
+                        viewBox="0 0 12 12"
+                        fill="none"
+                      >
+                        <path
+                          d="M3 6L5 8L9 4"
+                          stroke="white"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                      </svg>
+                    )}
+                  </div>
+
+                  {/* Info */}
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 8,
+                        marginBottom: 4,
+                      }}
+                    >
+                      <span
+                        className="badge"
+                        style={{
+                          background: badge.bg,
+                          color: badge.text,
+                        }}
+                      >
+                        {lap.game}
+                      </span>
+                      <span
+                        style={{
+                          fontSize: 14,
+                          fontWeight: 600,
+                          color: "var(--text-primary)",
+                        }}
+                      >
+                        {lap.track || "Unknown Track"}
+                      </span>
+                    </div>
+                    <div
+                      style={{
+                        display: "flex",
+                        gap: 16,
+                        fontSize: 13,
+                        color: "var(--text-secondary)",
+                      }}
+                    >
+                      <span>{lap.car || "Unknown Car"}</span>
+                      <span>Lap {lap.lap_number}</span>
+                      {lap.recorded_at && (
+                        <span>{timeAgo(lap.recorded_at)}</span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Time */}
+                  <div style={{ textAlign: "right", flexShrink: 0 }}>
+                    <p
+                      style={{
+                        margin: 0,
+                        fontSize: 18,
+                        fontWeight: 700,
+                        fontVariantNumeric: "tabular-nums",
+                        color:
+                          bestLap?.id === lap.id
+                            ? "var(--accent)"
+                            : "var(--text-primary)",
+                      }}
+                    >
+                      {formatLapTime(lap.lap_time_ms)}
+                    </p>
+                    {!lap.is_valid && (
+                      <span
+                        style={{
+                          fontSize: 11,
+                          color: "var(--error)",
+                          fontWeight: 500,
+                        }}
+                      >
+                        Invalid
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Arrow */}
+                  <ChevronRight
+                    size={18}
+                    color="var(--text-muted)"
+                    style={{ flexShrink: 0, cursor: "pointer" }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      router.push(`/laps/${lap.id}`);
+                    }}
+                  />
+                </motion.div>
+              );
+            })}
+          </div>
+        )}
+      </motion.div>
     </div>
   );
 }

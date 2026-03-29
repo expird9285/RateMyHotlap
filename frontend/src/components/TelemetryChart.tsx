@@ -1,149 +1,185 @@
 "use client";
+
 import {
-  ResponsiveContainer, LineChart, Line, XAxis, YAxis,
-  Tooltip, CartesianGrid, Legend
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+  Legend,
 } from "recharts";
-import { useMemo } from "react";
+
+interface ChannelConfig {
+  key: string;
+  label: string;
+  color: string;
+  unit: string;
+}
+
+const CHANNEL_PRESETS: Record<string, ChannelConfig> = {
+  speed: { key: "speed", label: "속도", color: "#0d9488", unit: "km/h" },
+  throttle: {
+    key: "throttle",
+    label: "스로틀",
+    color: "#22c55e",
+    unit: "%",
+  },
+  brake: { key: "brake", label: "브레이크", color: "#ef4444", unit: "%" },
+  steer: { key: "steer", label: "스티어링", color: "#f59e0b", unit: "°" },
+  rpm: { key: "rpm", label: "RPM", color: "#8b5cf6", unit: "rpm" },
+  gear: { key: "gear", label: "기어", color: "#64748b", unit: "" },
+  g_lat: {
+    key: "g_lat",
+    label: "Lateral G",
+    color: "#ec4899",
+    unit: "G",
+  },
+  g_lon: {
+    key: "g_lon",
+    label: "Longitudinal G",
+    color: "#06b6d4",
+    unit: "G",
+  },
+};
 
 interface TelemetryChartProps {
-  channels: Record<string, number[]>;
-  /** Which channels to display */
-  visibleChannels?: string[];
-  /** X-axis key: "time_ms" or "spline" */
-  xAxis?: string;
-  /** Title of the chart */
-  title?: string;
-  /** Height in px */
+  telemetry: Record<string, number[]>;
+  channels?: string[];
   height?: number;
-  /** For overlays: second dataset */
-  overlayChannels?: Record<string, number[]>;
+  /** For overlay: a second set of telemetry data */
+  overlayTelemetry?: Record<string, number[]>;
   overlayLabel?: string;
 }
 
-const CHANNEL_COLORS: Record<string, string> = {
-  speed: "#3b82f6",
-  throttle: "#22c55e",
-  brake: "#ef4444",
-  steer: "#f59e0b",
-  rpm: "#a855f7",
-  gear: "#06b6d4",
-  g_lat: "#ec4899",
-  g_lon: "#f97316",
-};
-
-const CHANNEL_LABELS: Record<string, string> = {
-  speed: "Speed (km/h)",
-  throttle: "Throttle (%)",
-  brake: "Brake (%)",
-  steer: "Steer (°)",
-  rpm: "RPM",
-  gear: "Gear",
-  g_lat: "G Lat",
-  g_lon: "G Lon",
-};
-
-function downsample(data: any[], targetPoints: number): any[] {
-  if (data.length <= targetPoints) return data;
-  const step = Math.ceil(data.length / targetPoints);
-  return data.filter((_, i) => i % step === 0);
-}
-
-export default function TelemetryChart({
-  channels,
-  visibleChannels,
-  xAxis = "time_ms",
-  title,
-  height = 300,
-  overlayChannels,
-  overlayLabel,
+export function TelemetryChart({
+  telemetry,
+  channels = ["speed", "throttle", "brake"],
+  height = 320,
+  overlayTelemetry,
+  overlayLabel = "B",
 }: TelemetryChartProps) {
-  const shownChannels = visibleChannels
-    ?? Object.keys(channels).filter((k) => k !== "time_ms" && k !== "spline");
+  if (!telemetry || !telemetry.time_ms) return null;
 
-  const chartData = useMemo(() => {
-    const xData = channels[xAxis] || [];
-    const len = xData.length;
-    if (len === 0) return [];
+  // Build chart data
+  const timeData = telemetry.time_ms;
+  const maxPoints = 600;
+  const step = Math.max(1, Math.floor(timeData.length / maxPoints));
 
-    const rows = [];
-    for (let i = 0; i < len; i++) {
-      const row: any = { x: xData[i] };
-      for (const ch of shownChannels) {
-        row[ch] = channels[ch]?.[i] ?? null;
-        if (overlayChannels) {
-          row[`${ch}_b`] = overlayChannels[ch]?.[i] ?? null;
-        }
+  const chartData = [];
+  for (let i = 0; i < timeData.length; i += step) {
+    const point: Record<string, number> = {
+      time: Math.round(timeData[i] / 100) / 10, // seconds with 1 decimal
+    };
+    for (const ch of channels) {
+      if (telemetry[ch]) {
+        point[ch] = telemetry[ch][i] ?? 0;
       }
-      rows.push(row);
+      if (overlayTelemetry?.[ch]) {
+        const overlayIdx = Math.round(
+          (i / timeData.length) *
+            ((overlayTelemetry.time_ms?.length || timeData.length) - 1)
+        );
+        point[`${ch}_overlay`] =
+          overlayTelemetry[ch][overlayIdx] ?? 0;
+      }
     }
-    return downsample(rows, 600);
-  }, [channels, overlayChannels, xAxis, shownChannels]);
-
-  if (chartData.length === 0) {
-    return (
-      <div className="flex items-center justify-center h-40 text-zinc-500 text-sm">
-        No telemetry data available
-      </div>
-    );
+    chartData.push(point);
   }
 
-  const xLabel = xAxis === "time_ms" ? "Time (s)" : "Track Position";
+  const activeChannels = channels.filter((ch) => telemetry[ch]);
 
   return (
-    <div>
-      {title && <h3 className="text-sm font-semibold text-zinc-300 mb-2">{title}</h3>}
+    <div
+      className="card-static"
+      style={{
+        padding: "16px 12px 8px",
+      }}
+    >
       <ResponsiveContainer width="100%" height={height}>
-        <LineChart data={chartData} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke="#27272a" />
-          <XAxis
-            dataKey="x"
-            tick={{ fill: "#71717a", fontSize: 11 }}
-            tickFormatter={(v) =>
-              xAxis === "time_ms" ? `${(v / 1000).toFixed(0)}s` : v.toFixed(2)
-            }
+        <LineChart
+          data={chartData}
+          margin={{ top: 4, right: 12, bottom: 4, left: -10 }}
+        >
+          <CartesianGrid
+            strokeDasharray="3 3"
+            stroke="var(--border)"
+            opacity={0.5}
           />
-          <YAxis tick={{ fill: "#71717a", fontSize: 11 }} />
+          <XAxis
+            dataKey="time"
+            tick={{ fontSize: 11, fill: "var(--text-muted)" }}
+            tickLine={false}
+            axisLine={{ stroke: "var(--border)" }}
+            label={{
+              value: "시간 (s)",
+              position: "insideBottomRight",
+              offset: -4,
+              style: { fontSize: 11, fill: "var(--text-muted)" },
+            }}
+          />
+          <YAxis
+            tick={{ fontSize: 11, fill: "var(--text-muted)" }}
+            tickLine={false}
+            axisLine={{ stroke: "var(--border)" }}
+          />
           <Tooltip
             contentStyle={{
-              background: "#18181b",
-              border: "1px solid #3f3f46",
-              borderRadius: "8px",
-              fontSize: "12px",
+              background: "var(--bg-card)",
+              border: "1px solid var(--border)",
+              borderRadius: "var(--radius-sm)",
+              boxShadow: "var(--shadow-md)",
+              fontSize: 12,
             }}
-            labelFormatter={(v) =>
-              xAxis === "time_ms" ? `${(v / 1000).toFixed(2)}s` : `Pos: ${v}`
-            }
           />
-          <Legend wrapperStyle={{ fontSize: "12px", color: "#a1a1aa" }} />
+          <Legend
+            wrapperStyle={{ fontSize: 12, paddingTop: 8 }}
+            iconType="circle"
+            iconSize={8}
+          />
 
-          {shownChannels.map((ch) => (
-            <Line
-              key={ch}
-              type="monotone"
-              dataKey={ch}
-              name={CHANNEL_LABELS[ch] || ch}
-              stroke={CHANNEL_COLORS[ch] || "#71717a"}
-              strokeWidth={1.5}
-              dot={false}
-              animationDuration={0}
-            />
-          ))}
-
-          {overlayChannels &&
-            shownChannels.map((ch) => (
+          {activeChannels.map((ch) => {
+            const config = CHANNEL_PRESETS[ch] || {
+              key: ch,
+              label: ch,
+              color: "#94a3b8",
+              unit: "",
+            };
+            return (
               <Line
-                key={`${ch}_b`}
+                key={ch}
                 type="monotone"
-                dataKey={`${ch}_b`}
-                name={`${CHANNEL_LABELS[ch] || ch} (${overlayLabel || "B"})`}
-                stroke={CHANNEL_COLORS[ch] || "#71717a"}
+                dataKey={ch}
+                name={config.label}
+                stroke={config.color}
                 strokeWidth={1.5}
-                strokeDasharray="5 5"
                 dot={false}
-                animationDuration={0}
-                opacity={0.6}
+                activeDot={{ r: 3 }}
               />
-            ))}
+            );
+          })}
+
+          {/* Overlay lines */}
+          {overlayTelemetry &&
+            activeChannels.map((ch) => {
+              const config = CHANNEL_PRESETS[ch];
+              if (!config || !overlayTelemetry[ch]) return null;
+              return (
+                <Line
+                  key={`${ch}_overlay`}
+                  type="monotone"
+                  dataKey={`${ch}_overlay`}
+                  name={`${config.label} (${overlayLabel})`}
+                  stroke={config.color}
+                  strokeWidth={1.5}
+                  strokeDasharray="4 3"
+                  dot={false}
+                  activeDot={{ r: 3 }}
+                  opacity={0.6}
+                />
+              );
+            })}
         </LineChart>
       </ResponsiveContainer>
     </div>
